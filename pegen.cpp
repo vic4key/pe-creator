@@ -76,7 +76,7 @@ int main(int, const char*[])
 
 	printf("CE -> PE Header -> Created!\n");
 
-	// Point to Section Header
+	// Pointer to Section Header
 	TSecHeader * sec = (PSecHeader)((unsigned long)pe + sizeof(TNtHeader));
 
 	unsigned long PeData = 0x200;
