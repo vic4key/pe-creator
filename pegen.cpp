@@ -184,7 +184,7 @@ int main(int, const char*[])
 	unsigned long vaIAT = (unsigned long)thunkTable - (unsigned long)p - dsec->PointerToRawData + dsec->VirtualAddress + pe->ImageBase;
 
 	*(unsigned long*)(&code[8])	 = 0x16 + vaOEP; // Message Caption's VA
-	*(unsigned long*)(&code[3])  = 0x26 + vaOEP; // Message Text's VA
+	*(unsigned long*)(&code[3])	 = 0x26 + vaOEP; // Message Text's VA
 	*(unsigned long*)(&code[16]) = vaIAT + 0;	 // MessageBoxA's VA
 
 	memcpy((void*)osOEP, &code, sizeof(code));
