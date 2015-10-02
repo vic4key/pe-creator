@@ -23,7 +23,7 @@ int main(int, const char*[])
 
 	free(cBuffer);
 
-	// printf("CE -> Empty File -> Created!\n");
+	/* ... */
 
 	fm.catInit(PE_FILENAME);
 
@@ -39,7 +39,7 @@ int main(int, const char*[])
 
 	if (!p) return 1;
 
-	// Fill pe file content to zero
+	// Fill file content to zero
 	memset(p, 0, fm.catGetFileSize());
 
 	// Dos Header
