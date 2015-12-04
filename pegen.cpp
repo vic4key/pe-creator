@@ -13,7 +13,7 @@ const int	 PE_FILEIZE  = 2048;
 int main(int, const char*[])
 {
 	CcatFile pefile;
-	CcatFileMapping fm;
+	
 	static void * cBuffer = malloc(PE_FILEIZE);
 	memset((void*)cBuffer, 0, PE_FILEIZE);
 
@@ -24,6 +24,8 @@ int main(int, const char*[])
 	free(cBuffer);
 
 	/* ... */
+	
+	CcatFileMapping fm;
 
 	fm.catInit(PE_FILENAME);
 
