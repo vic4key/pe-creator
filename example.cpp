@@ -1,201 +1,276 @@
-#include <cstring>
-#include <CatEngine.h>
+/**
+ * This is an example that manually created a PE file format with a minimum required, minimum
+ * PE format structure fields have to use and can not be missed of a PE file.
+ * This can help you to understand the PE file format, the work-flow for creating a PE file,
+ * for manual unpacking, for IAT fixing, etc.
+ *
+ * References
+ * - https://en.wikipedia.org/wiki/Portable_Executable
+ * - https://docs.microsoft.com/en-us/windows/win32/debug/pe-format
+ * - https://docs.microsoft.com/en-us/archive/msdn-magazine/2002/february/inside-windows-win32-portable-executable-file-format-in-detail
+ */
 
-/* MinGW build EXE with static library
-G++ pegen.cpp -lCatEngine -lws2_32 -o pegen.exe && pegen.exe
-*/
+#define _CRT_SECURE_NO_WARNINGS
 
-using namespace ce;
+#include <iostream>
+#include <cassert>
+#include <vector>
+#include <map>
 
-const TCHAR* PE_FILENAME = "pe.exe";
-const int	 PE_FILEIZE  = 2048;
+#include <vu> /* https://github.com/vic4key/Vutils */
+
+using namespace vu;
+
+template<typename Ptr>
+size_t StrCpyT(Ptr p, const std::string& s)
+{
+  strncpy(reinterpret_cast<char*>(p), s.c_str(), s.length());
+  return s.size();
+}
+
+#define ToRVA(pSH, p) (DWORD(p) - DWORD(pBase) - pSH->PointerToRawData + pSH->VirtualAddress)
+#define ToVA(pSH, p) (DWORD(p) - DWORD(pBase) - pSH->PointerToRawData + pSH->VirtualAddress + pPE->ImageBase)
 
 int main(int, const char*[])
 {
-	CcatFile pefile;
-	
-	static void * cBuffer = malloc(PE_FILEIZE);
-	memset((void*)cBuffer, 0, PE_FILEIZE);
+  CBuffer bin(3*KiB);
 
-	pefile.catInit(PE_FILENAME, fgReadWrite, fmCreateAlway, fsReadWrite, faNorm);
-	pefile.catWrite(cBuffer, PE_FILEIZE);
-	pefile.catClose();
+  const auto pBase = reinterpret_cast<PBYTE>(bin.GetpData());
 
-	free(cBuffer);
+  // DOS Header
 
-	/* ... */
-	
-	CcatFileMapping fm;
+  const auto pDOS = PDOSHeader(pBase);
+  pDOS->e_magic = IMAGE_DOS_SIGNATURE; // 'MZ'
+  pDOS->e_lfanew = 0x80; // For this example, default PE Header offset
 
-	fm.catInit(PE_FILENAME);
+  std::cout << "PE -> DOS Header -> Created" << std::endl;
 
-	printf("CE -> PE File -> Initialized!\n");
+  // PE Header (NT Header + Data Directory = Signature + File Header + Optional Header + Data Directory)
 
-	fm.catCreate(NULL);
+  const auto pPE = PPEHeader(DWORD(pBase) + pDOS->e_lfanew);
 
-	printf("CE -> PE File -> Mapped!\n");
+  pPE->Signature = IMAGE_NT_SIGNATURE; // 'PE'
 
-	void * p = fm.catView();
+  // File Header
 
-	printf("CE -> PE File -> Loaded!\n");
+  pPE->Machine = IMAGE_FILE_MACHINE_I386; // Can only be run on machine architecture is Intel 386
+  // pPE->NumberOfSections = ?; // TODO: Fixup Later
+  pPE->SizeOfOptionalHeader = sizeof(TOptHeader32);
+  pPE->Characteristics = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_32BIT_MACHINE; // File is executable on 32-bit machine
 
-	if (!p) return 1;
+  // Optional Header
 
-	// Fill file content to zero
-	memset(p, 0, fm.catGetFileSize());
+  pPE->Magic = IMAGE_NT_OPTIONAL_HDR32_MAGIC; // PE32
+  // pPE->SizeOfCode = ? ; // TODO: Fixup Later
+  // pPE->AddressOfEntryPoint = ? ; // TODO: Fixup Later
+  // pPE->BaseOfCode = ? ; // TODO: Fixup Later
+  // pPE->BaseOfData = ? ; // TODO: Fixup Later
+  pPE->ImageBase = 0x00400000; // For this example
+  pPE->SectionAlignment = 0x1000; // For this example
+  pPE->FileAlignment = 0x200; // For this example
+  pPE->MajorSubsystemVersion = 5; // The minimum Subsystem version required to run the executable
+  pPE->MinorSubsystemVersion = 2; // Windows NT 5.2
+  // pPE->SizeOfImage = ?;   // TODO: Fixup Later
+  // pPE->SizeOfHeaders = ?; // TODO: Fixup Later
+  pPE->SubSystem = IMAGE_SUBSYSTEM_WINDOWS_GUI; // Windows GUI
+  pPE->NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES; // Almost, set to max number of directory entries
 
-	// Dos Header
-	TDosHeader * mz = (PDosHeader)p;
-	if (!mz) return 1;
+  std::cout << "PE -> PE Header -> Created" << std::endl;
 
-	// Dos Header
-	mz->e_magic = 0x5A4D;			// 'MZ'
-	mz->e_lfanew = 0x40;			// PE Header offset
+  // Section Header(s)
 
-	printf("CE -> DOS Header -> Created!\n");
+  std::cout << "PE -> Section Headers -> Created" << std::endl;
 
-	// PE Header
-	TPeHeader * pe = (PPeHeader)((unsigned long)p + mz->e_lfanew);
-	if (!pe) return 1;
+  auto pSH = PSectionHeader(DWORD(pPE) + sizeof(TNTHeader)); // The Section Header(s) after the NT Header
 
-	// File Header
-	pe->Signature = 0x00004550;		// 'PE'
-	pe->Machine = 0x014C;			// Intel 386
-	pe->NumberOfSections = 2;
-	pe->SizeOfOptionalHeader = 0x00E0;
-	pe->Characteristics = 0x0102;	// File is executable && 32-bit word machine
+  // For this example, default offset after the last section header, refer to pPE->SizeOfHeaders
+  const DWORD PEBody = 0x200;
+  static int  iSH = 0;
 
-	// Optional Header
-	pe->Magic = 0x010B;				// PE32
-	pe->ImageBase = 0x00400000;
-	pe->SectionAlignment = 0x1000;
-	pe->FileAlignment = 0x200;
-	pe->MajorSubsystemVersion = 4;	// The minimum subsystem version required to run the executable
-	pe->MinorSubsystemVersion = 0;	// is Windows NT 4.0
-	pe->SizeOfHeaders = 0x200;		// Note
-	pe->Subsystem = 2;				// Windows GUI
-	pe->NumberOfRvaAndSizes = 0x10;
+  PSectionHeader pSHLast = nullptr;
 
-	printf("CE -> PE Header -> Created!\n");
+  // For this example,
+  // Default the raw/virtual offset is continuous file offset + raw size of previous section
+  // Default the raw/virtual size is equal to OptHeader.FileAlignment/OptHeader.SectionAlignment
+  const auto AddSectionHeader = [&](const std::string& name, const DWORD characteristics) -> PSectionHeader
+  {
+    PSectionHeader result = nullptr;
 
-	// Pointer to Section Header
-	TSecHeader * sec = (PSecHeader)((unsigned long)pe + sizeof(TNtHeader));
+    static TSectionHeader empty = { 0 };
+    ZeroMemory(&empty, sizeof(empty));
+    empty.PointerToRawData = PEBody;
+    empty.SizeOfRawData = pPE->FileAlignment;
+    empty.Misc.VirtualSize = pPE->SectionAlignment;
 
-	unsigned long PeData = 0x200;
+    const auto pPrevSection = iSH == 0 ? &empty : pSH - 1;
+    assert(pPrevSection != nullptr);
 
-	// .CODE section
-	strncpy((char*)sec->Name, ".CODE", 8);
-	sec->PointerToRawData = PeData;
-	sec->SizeOfRawData = pe->FileAlignment;
-	sec->VirtualAddress = pe->SectionAlignment;
-	sec->Misc.VirtualSize = pe->SectionAlignment;
-	sec->Characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ;
-	// Pointer to .CODE section
-	TSecHeader * csec = sec;
+    StrCpyT(pSH->Name, name.c_str());
+    pSH->PointerToRawData = pPrevSection->PointerToRawData + pPrevSection->SizeOfRawData;
+    pSH->SizeOfRawData = pPE->FileAlignment;
+    pSH->VirtualAddress = pPrevSection->VirtualAddress + pPrevSection->Misc.VirtualSize;
+    pSH->Misc.VirtualSize = pPE->SectionAlignment;
+    pSH->Characteristics = characteristics;
 
-	printf("CE -> .CODE Section -> Created!\n");
+    result = pSH;
 
-	// next section
-	sec++;
+    std::cout << "PE -> Section Header -> " << name.c_str() << " -> Created" << std::endl;
 
-	// .DATA section
-	strncpy((char*)sec->Name, ".DATA", 8);
-	sec->PointerToRawData = csec->PointerToRawData + csec->SizeOfRawData;
-	sec->SizeOfRawData = pe->FileAlignment;
-	sec->VirtualAddress = csec->VirtualAddress + csec->Misc.VirtualSize;
-	sec->Misc.VirtualSize = pe->SectionAlignment;
-	sec->Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE;
-	// Pointer to .DATA section
-	TSecHeader * dsec = sec;
+    iSH++;
+    pSH++;
 
-	printf("CE -> .DATA Section -> Created!\n");
+    pSHLast = result;
 
-	// Valid
-	pe->AddressOfEntryPoint = csec->VirtualAddress;
-	pe->SizeOfImage = dsec->VirtualAddress + dsec->Misc.VirtualSize;
-	pe->BaseOfCode = csec->VirtualAddress;
-	pe->SizeOfCode = csec->Misc.VirtualSize;
-	pe->BaseOfData = dsec->VirtualAddress;
+    return result;
+  };
 
-	printf("CE -> PE Header -> Fixed!\n");
+  // Add .code section
+  const auto pSHCode = AddSectionHeader(
+    ".code", IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_EXECUTE);
 
-	// Import Directory
-	pe->Import.VirtualAddress = dsec->VirtualAddress;
-	pe->Import.Size = sizeof(TImportDesc);
+  // Add .data section
+  const auto pSHData = AddSectionHeader(
+    ".data", IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE);
 
-	printf("CE -> Import Directory -> Created!\n");
+  // Add .idata section
+  const auto pSHImport = AddSectionHeader(
+    ".idata", IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE);
 
-	 // Pointer to Import Data, (malloc with 4 empty-block)
-	char * idp = (char*)p + dsec->PointerToRawData + 4*sizeof(TImportDesc);
-	strcpy((char*)idp, "user32.dll");
+  // Fixup PE Header
 
-	// Pointer to Import Description
-	TImportDesc * iid = (PImportDesc)((unsigned long)p + dsec->PointerToRawData);
-	char * moduleTable = (char*)iid + 4*sizeof(TImportDesc); // Pointer to Name
-	char * thunkTable = (char*)iid + 8*sizeof(TImportDesc);  // Pointer to FirstThunk
-	char * thunkData = (char*)iid + 12*sizeof(TImportDesc);  // Pointer to ThunkData
+  pPE->NumberOfSections = iSH;
+  pPE->AddressOfEntryPoint = pSHCode->VirtualAddress;
+  pPE->BaseOfCode = pSHCode->VirtualAddress;
+  pPE->SizeOfCode = pSHCode->Misc.VirtualSize;
+  pPE->BaseOfData = pSHData->VirtualAddress;
+  pPE->SizeOfImage = pSHLast->VirtualAddress + pSHLast->Misc.VirtualSize;
+  pPE->SizeOfHeaders = VU_ALIGN_UP(DWORD(PBYTE(pSH) - pBase), pPE->FileAlignment); // The offset after the last section is the end / combined-size of all headers.
 
-	// Use one IID user32.dll
-	strcpy((char*)moduleTable, "user32.dll");
-	iid->Name = (unsigned long)(moduleTable - (char*)iid) + dsec->VirtualAddress;
-	iid->FirstThunk = (thunkTable - (char*)iid) + dsec->VirtualAddress; // Pointer to IAT
+  std::cout << "PE -> PE Header -> Fixed" << std::endl;
 
-	// APIs gonna import
-	const struct {
-		const unsigned short Hint;
-		const char * Name;
-	} apis[] = {
-		{0, "MessageBoxA"},
-		{1, "MessageBoxW"},
-		{2, "MessageBeep"}
-	};
+  // Import Directory
 
-	// Generate Import Address Table
-	size_t size = 0, napi = sizeof(apis)/sizeof(apis[0]);
-	for (int i = 0; i < napi; i++) {
-		size = 2 + strlen(apis[i].Name);
-		// Save to Thunk Data
-		*(unsigned short*)thunkData = apis[i].Hint;
-		strcpy(thunkData + 2, apis[i].Name);
-		// Save to Thunk Table
-		*(unsigned long*)(thunkTable + 4*i) = thunkData - (char*)iid + dsec->VirtualAddress;
-		thunkData += (size + 1); // 1-byte for padding
-	}
+  pPE->Import.VirtualAddress = pSHImport->VirtualAddress;
+  pPE->Import.Size = sizeof(TImportDescriptor);
 
-	printf("CE -> IAT -> Created!\n");
+  std::cout << "PE -> Import Directories -> Created" << std::endl;
 
-	// Program code for testing.
-	unsigned char code[] = {
-		0x6A, 0x00,							// push	0	MB_OK
-		0x68, 0x00, 0x00, 0x00, 0x00,		// push	?	Text (3)
-		0x68, 0x00, 0x00, 0x00, 0x00,		// push	?	Caption (8)
-		0x6A, 0x00,							// push 0	NULL
-		0xFF, 0x15, 0x00, 0x00, 0x00, 0x00, // call MessageBoxA (16)
-		0xC3,								// ret
-		0x00,
-		0x49,0x20,0x61,0x6d,0x20,0x43,		// 'I am CatEngine' string for text message
-		0x61,0x74,0x45,0x6e,0x67,0x69,
-		0x6e,0x65,0x21,
-		0x00,
-		0x43,0x61,0x74,0x45,0x6e,0x67,		// 'CatEngine' string for caption message
-		0x69,0x6e,0x65,0x00
-	};
+  typedef std::pair<ushort, std::string> ImportByName;
+  std::map<std::string, std::vector<ImportByName>> m;
+  std::vector<ImportByName> l;
 
-	unsigned long osOEP = (unsigned long)p + csec->PointerToRawData;
-	unsigned long vaOEP = pe->AddressOfEntryPoint + pe->ImageBase;
-	unsigned long vaIAT = (unsigned long)thunkTable - (unsigned long)p - dsec->PointerToRawData + dsec->VirtualAddress + pe->ImageBase;
+  l.clear();
+  l.push_back(ImportByName(0, "MessageBoxA"));
+  m["user32.dll"] = l;
 
-	*(unsigned long*)(&code[8])	 = 0x16 + vaOEP; // Message Caption's VA
-	*(unsigned long*)(&code[3])	 = 0x26 + vaOEP; // Message Text's VA
-	*(unsigned long*)(&code[16]) = vaIAT + 0;	 // MessageBoxA's VA
+  auto pIDT = PImportDescriptor(pBase + pSHImport->PointerToRawData);
 
-	memcpy((void*)osOEP, &code, sizeof(code));
+  // Create IDT, IAT, Thunk Data for each IDT or each DLL
 
-	printf("CE -> Sample Code -> Created!\n");
+  /* Write them all in .idata section
+   * Array<IDT> | Array<IAT | DLL | Array<Hint, Function>>
+   * or
+   * |--- Array for <IDT>
+   * | IDT / Import Descriptor (s) / 20 bytes for each dll / padding 1 IDT = 20 bytes
+   * |--- Array for <IAT, DLL, Thunk Data>
+   * |  | IAT / Thunk Table / 4 bytes for each function / padding 1 DWORD = 4 bytes
+   * |  |---
+   * |  | DLL / DLL Name / depends on dll name / any padding
+   * |  |---
+   * |  | IBN / Thunk Data / import by name (s) / depends on function hint/name / any padding
+   * |  |---
+  */
 
-	fm.catClose();
+  // Total size of IDTs
+  const auto TotalSizeIDTs = (m.size() + 1) * sizeof(TImportDescriptor); // +1 for an empty IDD
+  auto pPtr = PBYTE(pIDT) + TotalSizeIDTs;
 
-	printf("CE -> PE File -> Done!\n");
+  for (const auto& e : m)
+  {
+    auto pIAT = PDWORD(pPtr);
+    auto rvaIAT = ToRVA(pSHImport, pIAT);
 
-	return 0;
+    const auto EachIATSize = (e.second.size() + 1) * sizeof(DWORD); // +1 DWORD for IAT padding
+    pPtr += EachIATSize;
+
+    // Write hint/name of import functions of each DLL
+
+    StrCpyT(pPtr, e.first.c_str());
+    auto rvaName = ToRVA(pSHImport, pPtr);
+
+    pPtr += e.first.size() + 1; // +1 for a null-char padding
+
+    for (const auto& ibn : e.second) // image import by name (s)
+    {
+      *PWORD(pPtr) = ibn.first; // Hint
+      StrCpyT(pPtr + sizeof(WORD), ibn.second.c_str()); // Name
+
+      *pIAT++ = ToRVA(pSHImport, pPtr); // Update Thunk Data for each import function in IAT
+
+      pPtr += sizeof(WORD) + ibn.second.size() + 2; // +2 for string terminating null-character & a null-char a null-char padding
+    }
+
+    // Update IDT for each DLL
+
+    pIDT->Name = rvaName;
+    pIDT->FirstThunk = rvaIAT;
+    pIDT->OriginalFirstThunk = rvaIAT;
+
+    std::cout << "PE -> Import Directory -> " << e.first << " -> Created" << std::endl;
+
+    pIDT++; // Next IDD
+  }
+
+  pIDT++; // Next an empty IDD to mark end of IDT array
+
+  // Executable Codes
+
+  BYTE code[] =
+  {
+    0x6A, 0x40,                         // push 40 uType = MB_ICONINFORMATION + MB_OK
+    0x68, 0x00, 0x00, 0x00, 0x00,       // push ?  lpCaption = ? (offset 3)  // TODO: Fixup Later
+    0x68, 0x00, 0x00, 0x00, 0x00,       // push ?  lpText = ?    (offset 8)  // TODO: Fixup Later
+    0x6A, 0x00,                         // push 0  hWnd = NULL
+    0xFF, 0x15, 0x00, 0x00, 0x00, 0x00, // call MessageBoxA = ? (offset 16) // TODO: Fixup Later
+    0xC3,                               // ret
+  };
+
+  // Write data such as message, caption, etc to .data section
+
+  auto pData = pBase + pSHData->PointerToRawData;
+
+  auto len = StrCpyT(pData, "Howdy, Vic P.");
+  const auto vaCaption = ToVA(pSHData, pData);
+  pData += len + 1; // +1 for string terminating null-character
+
+  StrCpyT(pData, "This is an example that manually created a PE file format");
+  const auto vaText = ToVA(pSHData, pData);
+  pData += len + 1; // +1 for string terminating null-character
+
+  // Correct API callee to imported functions that defined in the IAT
+
+  pIDT = PImportDescriptor(pBase + pSHImport->PointerToRawData);
+  auto pIAT = PBYTE(pIDT) + TotalSizeIDTs;
+  const auto vaMessageBoxA = ToVA(pSHImport, pIAT); // For this example, IAT contains only one this API, so treat IAT offset as its offset
+
+  std::cout << "PE -> Executable Codes -> Created" << std::endl;
+
+  // Fixup Executable Codes
+
+  *PDWORD(&code[8])  = vaText;
+  *PDWORD(&code[3])  = vaCaption;
+  *PDWORD(&code[16]) = vaMessageBoxA;
+
+  const auto OEP = pBase + pSHCode->PointerToRawData;
+  CopyMemory(OEP, &code, sizeof(code));
+
+  std::cout << "PE -> Executable Codes -> Fixed" << std::endl;
+
+  // Save To File
+
+  bin.SaveAsFile(_T("PE.EXE"));
+
+  std::cout << "PE -> File -> Created" << std::endl;
+
+  return 0;
 }
