@@ -10,6 +10,7 @@ References
 > - https://docs.microsoft.com/en-us/windows/win32/debug/pe-format
 > - https://docs.microsoft.com/en-us/archive/msdn-magazine/2002/february/inside-windows-win32-portable-executable-file-format-in-detail
 
-![](example.png)
+![](example-1.png)
+![](example-2.png)
 
 Website: https://vic.onl/
