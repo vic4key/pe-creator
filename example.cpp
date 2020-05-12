@@ -55,7 +55,7 @@ int main(int, const char*[])
 
   pPE->Machine = IMAGE_FILE_MACHINE_I386; // Can only be run on machine architecture is Intel 386
   // pPE->NumberOfSections = ?; // TODO: Fixup Later
-  pPE->SizeOfOptionalHeader = sizeof(TOptHeader32);
+  pPE->SizeOfOptionalHeader = sizeof(TOptHeader);
   pPE->Characteristics = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_32BIT_MACHINE; // File is executable on 32-bit machine
 
   // Optional Header
@@ -165,19 +165,22 @@ int main(int, const char*[])
 
   auto pIDT = PImportDescriptor(pBase + pSHImport->PointerToRawData);
 
-  // Create IDT, IAT, Thunk Data for each IDT or each DLL
+  // Create IDT, IAT, ILT for each DLL
+  // - IDT -> Import Directory Table that Array<IID>
+  // - IAT -> Import Address Table that Array<Thunk Data>
+  // - ILT -> Import Lookup Table that Array<Hint, Function>
 
   /* Write them all in .idata section
-   * Array<IDT> | Array<IAT | DLL | Array<Hint, Function>>
+   * Array<IDT> | Array<IAT | DLL | ILT>
    * or
    * |--- Array for <IDT>
    * | IDT / Import Descriptor (s) / 20 bytes for each dll / padding 1 IDT = 20 bytes
-   * |--- Array for <IAT, DLL, Thunk Data>
+   * |--- Array for <IAT, DLL, ILT>
    * |  | IAT / Thunk Table / 4 bytes for each function / padding 1 DWORD = 4 bytes
    * |  |---
    * |  | DLL / DLL Name / depends on dll name / any padding
    * |  |---
-   * |  | IBN / Thunk Data / import by name (s) / depends on function hint/name / any padding
+   * |  | ILT / Thunk Data / import by name (s) / depends on function hint/name / any padding
    * |  |---
   */
 
