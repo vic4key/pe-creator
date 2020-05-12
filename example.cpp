@@ -210,7 +210,7 @@ int main(int, const char*[])
 
       *pIAT++ = ToRVA(pSHImport, pPtr); // Update Thunk Data for each import function in IAT
 
-      pPtr += sizeof(WORD) + ibn.second.size() + 2; // +2 for string terminating null-character & a null-char a null-char padding
+      pPtr += sizeof(WORD) + ibn.second.size() + 2; // +2 for string terminating null-character & a null-char padding
     }
 
     // Update IDT for each DLL
